@@ -3,6 +3,23 @@ import torch
 import torch.nn as nn
 from tza import Reader
 from model import UNet, concat
+import argparse
+from pathlib import Path
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--features', '-f', type=str, nargs='*', required=True,
+                        choices=['hdr', 'ldr', 'albedo', 'alb', 'normal', 'nrm'],
+                        help='Set of input features')
+    parser.add_argument('--input_names', type=str, nargs='*', required=True,
+                        help='Set of input features')
+    parser.add_argument('--input_path_tza', type=Path, required=True,
+                        help='Path to tza model')
+    parser.add_argument('--output_path_onnx', type=Path, required=True,
+                        help='Path to save converting model')
+    cfg = parser.parse_args()
+    return cfg
 
 
 def convert_model(model, input_path_tza, output_path_onnx, input_names):
@@ -20,7 +37,7 @@ def convert_model(model, input_path_tza, output_path_onnx, input_names):
     dynamic_axis = {axis: {0: 'batch_size', 1: 'channel', 2: 'height', 3: 'width'}
                     for axis in input_names + ['output']}
     torch.onnx.export(model,
-                      args=(dummy_input, dummy_input),
+                      args=[dummy_input, dummy_input],
                       f=output_path_onnx,
                       verbose=False,
                       export_params=True,
@@ -30,15 +47,30 @@ def convert_model(model, input_path_tza, output_path_onnx, input_names):
 
 
 def preprocess_rt_hdr_alb(inputs):
-    input_color, input_albedo, input_normal = inputs
+    input_color, input_albedo = inputs[0], inputs[1]
     input_color = torch.clamp(input_color, min=0)
     input_albedo = torch.clamp(input_albedo, min=0, max=1)
     return concat(input_color, input_albedo)
 
 
-def get_model(num_input_channels):
-    return UNet(num_input_channels)
+def get_model(num_input_channels, preprocess_func):
+    return UNet(num_input_channels, 3, preprocess_func)
 
 
 def get_model_rt_hdr_alb():
-    return get_model(6)
+    return get_model(6, preprocess_rt_hdr_alb)
+
+
+def main():
+    cfg = parse_args()
+    features, input_path_tza, output_path_onnx, input_names = cfg.features, cfg.input_path_tza, \
+                                                              cfg.output_path_onnx, cfg.input_names
+    model = get_model_rt_hdr_alb()
+    convert_model(model,
+                  input_path_tza=input_path_tza,
+                  output_path_onnx=output_path_onnx,
+                  input_names=input_names)
+
+
+if __name__ == '__main__':
+    main()
